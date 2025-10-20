@@ -10,7 +10,8 @@
 - Download **ASVspoof 2021 (for evaluation)**  
   Link: [https://zenodo.org/records/4837263](https://zenodo.org/records/4837263)
 
----
+- Now, create another folder named asvspoof2019. e download ang folder nga naa ani dri sa gdrive: https://drive.google.com/drive/folders/1dtrVv2Z9V-k020tdSVYDiaGv6pV2Lg-7?usp=sharing
+- Ibutang dayon sa folder na asvspoof2019 katong gi download sa gdrive.
 
 ### 📂 Step 2: Extract the Files
 - After downloading, extract both datasets.  
@@ -52,6 +53,6 @@ Thesis training/
 
 ---
 
- E TRAIN NA DAYON 
+ E TRAIN NA DAYON. 
 
 ---
