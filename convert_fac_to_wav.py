@@ -3,8 +3,8 @@ import os
 from pydub import AudioSegment
 
 # Folder containing FLAC files
-input_folder = r"D:\LA\LA\ASVspoof2019_LA_dev\flac"
-output_folder = "dev"
+input_folder = r"D:\Thesis traning\asvspoof5\flac_T"
+output_folder =r"D:\Thesis traning\asvspoof5\wav_T"
 
 # Create output folder if it doesn't exist
 os.makedirs(output_folder, exist_ok=True)

@@ -1,10 +1,3 @@
-"""
-train_resnext_asvspoof2019_la.py
-
-Usage: edit BASE_DIR, then run:
-    python train_resnext_asvspoof2019_la.py
-"""
-
 import os
 import sys
 import math
@@ -25,10 +18,13 @@ from sklearn.metrics import roc_curve
 
 TRAIN_AUDIO_DIR = r"D:\Thesis traning\asvspoof2019\train"
 DEV_AUDIO_DIR   = r"D:\Thesis traning\asvspoof2019\dev"
-TRAIN_PROTO = r"D:\Thesis traning\protocols\ASVspoof2019.LA.cm.train.trn.txt"
-DEV_PROTO   = r"D:\Thesis traning\protocols\ASVspoof2019.LA.cm.dev.trl.txt"
+ASVSPOOF5_AUDIO_DIR = r"D:\Thesis traning\asvspoof5\wav_T"
+PROTOCOLS_DIR = r"D:\Thesis traning\protocols"
 
-OUT_MODEL = "models/resnext_lfcc_asvspoof2019_best.pth"
+TRAIN_PROTO = os.path.join(PROTOCOLS_DIR, "ASVspoof2019.LA.cm.train.trn.txt")
+DEV_PROTO   = os.path.join(PROTOCOLS_DIR, "ASVspoof2019.LA.cm.dev.trl.txt")
+
+OUT_MODEL = "models/resnext_with_spoof5_and_spoof2019.pth"
 os.makedirs(os.path.dirname(OUT_MODEL), exist_ok=True)
 
 # LFCC / preprocessing params
@@ -40,8 +36,8 @@ FRAME_SIZE = 0.025
 FRAME_STRIDE = 0.01
 MAX_FRAMES = 224   # number of time frames (width) to fix to for CNN input
 # Training hyperparams
-BATCH_SIZE = 8
-NUM_EPOCHS = 12
+BATCH_SIZE = 2
+NUM_EPOCHS = 10
 LR = 1e-4
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 NUM_WORKERS = 2 if torch.cuda.is_available() else 0
@@ -58,33 +54,68 @@ if DEVICE == "cuda":
 # Utilities: protocol loader
 # ------------------------
 def load_protocol(protocol_path, audio_dir):
-    """Return list of absolute audio paths and labels (0 bonafide, 1 spoof)."""
+    """Return list of absolute audio paths and labels (0 bonafide, 1 spoof).
+    Tolerant to several protocol formats: tries to find a filename token (wav/flac)
+    or falls back to the 2nd column as file id. Maps common label tokens."""
     paths, labels = [], []
     if not os.path.isfile(protocol_path):
         raise FileNotFoundError(f"Protocol file not found: {protocol_path}")
-    with open(protocol_path, "r") as f:
+    with open(protocol_path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
                 continue
             parts = line.split()
-            if len(parts) < 5:
-                continue
-            file_id = parts[1]  # ✅ Use 2nd column, not 1st
-            label_str = parts[-1].lower()
+            # try to locate a token that looks like a filename
+            file_id = None
+            for p in parts:
+                low = p.lower()
+                if low.endswith(".wav") or low.endswith(".flac"):
+                    file_id = os.path.splitext(os.path.basename(p))[0]
+                    break
+            # fallback to 2nd column if available, else first column
+            if file_id is None:
+                if len(parts) >= 2:
+                    file_id = parts[1]
+                else:
+                    file_id = parts[0]
+            # label token (use last token as common)
+            label_token = parts[-1].lower()
+            # construct path
             wav_name = file_id + ".wav"
             wav_path = os.path.join(audio_dir, wav_name)
             if not os.path.isfile(wav_path):
-                alt_flac = os.path.splitext(wav_path)[0] + ".flac"
-                if os.path.isfile(alt_flac):
-                    wav_path = alt_flac
-                else:
+                    # skip missing file
                     continue
-            label = 0 if label_str == "bonafide" else 1
+            # map label robustly
+            if label_token in ("bonafide", "genuine", "0"):
+                label = 0
+            elif label_token in ("spoof", "attack", "1"):
+                label = 1
+            else:
+                # try numeric
+                try:
+                    n = int(label_token)
+                    label = 0 if n == 0 else 1
+                except Exception:
+                    label = 0 if "bonafide" in label_token else 1
             paths.append(wav_path)
             labels.append(label)
-    print(f"✅ Loaded {len(paths)} samples from {protocol_path}")
+    print(f"✅ Loaded {len(paths)} samples from {protocol_path} using audio_dir={audio_dir}")
     return paths, labels
+
+def find_train_protocols(protocols_dir):
+    """Return train protocol files found in protocols_dir (sorted)."""
+    protos = []
+    if not os.path.isdir(protocols_dir):
+        return protos
+    for fname in sorted(os.listdir(protocols_dir)):
+        if not fname.lower().endswith(".txt"):
+            continue
+        if "train" in fname.lower():
+            protos.append(os.path.join(protocols_dir, fname))
+    return protos
+
 # ------------------------
 # LFCC extraction functions
 # ------------------------
@@ -144,28 +175,60 @@ def extract_lfcc_from_waveform(y, sr=SR, n_fft=N_FFT, n_filters=N_FILTERS, n_cep
     return lfcc  # shape (num_frames, n_ceps)
 
 def load_audio_and_extract_lfcc(path, sr=SR, max_frames=MAX_FRAMES):
-    # read file (supports wav/flac)
-    data, fs = sf.read(path)
+    try:
+        data, fs = sf.read(path)
+    except Exception as e:
+        print(f"⚠️ Skipping unreadable file: {path} ({e})")
+        return np.zeros((N_CEPS, max_frames), dtype=np.float32)
+
+    # Convert to mono and resample if needed
     if fs != sr:
-        # resample with librosa
-        data = librosa.resample(data.astype(np.float32), orig_sr=fs, target_sr=sr)
+        try:
+            data = librosa.resample(data.astype(np.float32), orig_sr=fs, target_sr=sr)
+        except Exception as e:
+            print(f"⚠️ Resample failed for {path}: {e}")
+            return np.zeros((N_CEPS, max_frames), dtype=np.float32)
+
     if data.ndim > 1:
         data = np.mean(data, axis=1)
-    lfcc = extract_lfcc_from_waveform(data, sr=sr)
-    # lfcc: (num_frames, n_ceps) -> transpose to (n_ceps, num_frames)
+
+    # --- Safety cleaning rules ---
+    num_samples = len(data)
+    duration_sec = num_samples / sr
+
+    if duration_sec < 1.0:
+        print(f"⚠️ Skipping too short (<1s): {path}")
+        return np.zeros((N_CEPS, max_frames), dtype=np.float32)
+    if duration_sec > 20.0:
+        print(f"⚠️ Trimming long file (>20s): {path}")
+        data = data[:int(sr * 20)]  # trim instead of skip
+    if np.max(np.abs(data)) < 1e-5:
+        print(f"⚠️ Skipping silent file: {path}")
+        return np.zeros((N_CEPS, max_frames), dtype=np.float32)
+    if np.any(np.isnan(data)):
+        print(f"⚠️ Skipping NaN file: {path}")
+        return np.zeros((N_CEPS, max_frames), dtype=np.float32)
+    # ------------------------------
+
+    try:
+        lfcc = extract_lfcc_from_waveform(data, sr=sr)
+    except MemoryError:
+        print(f"💥 MemoryError — skipping heavy file: {path}")
+        return np.zeros((N_CEPS, max_frames), dtype=np.float32)
+    except Exception as e:
+        print(f"⚠️ LFCC extraction failed for {path}: {e}")
+        return np.zeros((N_CEPS, max_frames), dtype=np.float32)
+
     lfcc = lfcc.T
-    # pad or truncate to fixed width
     if lfcc.shape[1] < max_frames:
         pad_width = max_frames - lfcc.shape[1]
-        lfcc = np.pad(lfcc, ((0,0),(0,pad_width)), mode='constant', constant_values=0.0)
+        lfcc = np.pad(lfcc, ((0, 0), (0, pad_width)), mode="constant")
     else:
         lfcc = lfcc[:, :max_frames]
-    # normalize per-sample
-    mean = lfcc.mean()
-    std = lfcc.std() if lfcc.std() > 0 else 1.0
-    lfcc = (lfcc - mean) / std
-    return lfcc  # shape (n_ceps, max_frames)
 
+    mean, std = lfcc.mean(), lfcc.std() if lfcc.std() > 0 else 1
+    lfcc = (lfcc - mean) / std
+    return lfcc
 # ------------------------
 # Dataset
 # ------------------------
@@ -273,28 +336,92 @@ def train_model(model, train_loader, val_loader, device, epochs=NUM_EPOCHS, lr=L
 # Main
 # ------------------------
 def main():
-    print("Loading protocols...")
-    train_files, train_labels = load_protocol(TRAIN_PROTO, TRAIN_AUDIO_DIR)
+    print("Scanning protocols in:", PROTOCOLS_DIR)
+    train_proto_paths = find_train_protocols(PROTOCOLS_DIR)
+
+    # ensure explicit TRAIN_PROTO is first if present
+    if os.path.isfile(TRAIN_PROTO):
+        if TRAIN_PROTO in train_proto_paths:
+            train_proto_paths.remove(TRAIN_PROTO)
+        train_proto_paths.insert(0, TRAIN_PROTO)
+
+    # categorize protocols: 2019 first, then asvspoof5, unknown => 2019 group
+    proto_2019 = []
+    proto_5 = []
+    for p in train_proto_paths:
+        fn = os.path.basename(p).lower()
+        if "2019" in fn or "asvspoof2019" in fn or "la" in fn:
+            proto_2019.append(p)
+        elif "5" in fn or "asvspoof5" in fn:
+            proto_5.append(p)
+        else:
+            proto_2019.append(p)
+
+    all_train_files = []
+    all_train_labels = []
+
+    # load ASVspoof2019 train protocols first (using TRAIN_AUDIO_DIR)
+    for proto in proto_2019:
+        try:
+            paths, labels = load_protocol(proto, TRAIN_AUDIO_DIR)
+        except FileNotFoundError:
+            continue
+        if paths:
+            all_train_files.extend(paths)
+            all_train_labels.extend(labels)
+
+    # then load ASVspoof5 train protocols (using ASVSPOOF5_AUDIO_DIR)
+    for proto in proto_5:
+        try:
+            paths, labels = load_protocol(proto, ASVSPOOF5_AUDIO_DIR)
+        except FileNotFoundError:
+            continue
+        if paths:
+            all_train_files.extend(paths)
+            all_train_labels.extend(labels)
+
+    # fallback: if still empty, try scanning protocols and attempt both audio dirs for each proto
+    if len(all_train_files) == 0:
+        print("No train files found in prioritized pass; attempting both audio dirs per protocol.")
+        for proto in train_proto_paths:
+            for cand_dir in (TRAIN_AUDIO_DIR, ASVSPOOF5_AUDIO_DIR):
+                try:
+                    paths, labels = load_protocol(proto, cand_dir)
+                except FileNotFoundError:
+                    continue
+                if paths:
+                    all_train_files.extend(paths)
+                    all_train_labels.extend(labels)
+                    break
+
+    # final fallback to explicit TRAIN_PROTO + TRAIN_AUDIO_DIR if nothing
+    if len(all_train_files) == 0 and os.path.isfile(TRAIN_PROTO):
+        print("Final fallback: loading TRAIN_PROTO with TRAIN_AUDIO_DIR")
+        all_train_files, all_train_labels = load_protocol(TRAIN_PROTO, TRAIN_AUDIO_DIR)
+
+    # dev protocol (unchanged)
+    print("Loading dev protocol:", DEV_PROTO)
     dev_files, dev_labels = load_protocol(DEV_PROTO, DEV_AUDIO_DIR)
-    print(f"Train samples: {len(train_files)}  Dev samples: {len(dev_files)}")
-    if len(train_files)==0 or len(dev_files)==0:
-        print("No data found. Check BASE_DIR and protocol paths.")
+
+    print(f"Aggregated train samples: {len(all_train_files)}  Dev samples: {len(dev_files)}")
+    if len(all_train_files) == 0 or len(dev_files) == 0:
+        print("No data found. Check audio/protocol paths.")
         sys.exit(1)
 
     # Create datasets / loaders
-    train_ds = LFCCDataset(train_files, train_labels, max_frames=MAX_FRAMES)
+    train_ds = LFCCDataset(all_train_files, all_train_labels, max_frames=MAX_FRAMES)
     dev_ds = LFCCDataset(dev_files, dev_labels, max_frames=MAX_FRAMES)
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, pin_memory=True)
-    dev_loader = DataLoader(dev_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS, pin_memory=True)
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, pin_memory=(DEVICE=="cuda"))
+    dev_loader = DataLoader(dev_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS, pin_memory=(DEVICE=="cuda"))
 
     # model
     model = ResNeXtTeacher(num_classes=2)
     print("Model created. Device:", DEVICE)
-    print(model)  # optional: prints model summary (long)
+    # print(model)  # optional: prints model summary (long)
 
     # train
     train_model(model, train_loader, dev_loader, device=DEVICE, epochs=NUM_EPOCHS, lr=LR, save_path=OUT_MODEL)
 
 if __name__ == "__main__":
     main()
-
+# ...existing code...
