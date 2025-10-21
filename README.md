@@ -1,58 +1,111 @@
-# 🎙️ ASVspoof Training and Evaluation Guide
+# Lightweight Deepfake Audio Detection via ResNet to MobileNet Knowledge Distillation
 
-### 📥 Step 1: Download the Datasets
-- Download **ASVspoof 5**  
-  Link: [https://zenodo.org/records/14498691](https://zenodo.org/records/14498691)  
-  Files needed:  
-  - `flac_T_aa.tar`  
-  - `flac_T_bb.tar`
+This repository contains the implementation for a deepfake audio detection system using knowledge distillation, trained on the ASVspoof datasets.
 
-- Download **ASVspoof 2021 (for evaluation)**  
-  Link: [https://zenodo.org/records/4837263](https://zenodo.org/records/4837263)
+# Project Structure
 
-- Now, create another folder named asvspoof2019. e download ang folder nga naa ani dri sa gdrive: https://drive.google.com/drive/folders/1dtrVv2Z9V-k020tdSVYDiaGv6pV2Lg-7?usp=sharing
-- Ibutang dayon sa folder na asvspoof2019 katong gi download sa gdrive.
+The project is organized into a modular structure for clarity and scalability:
 
-### 📂 Step 2: Extract the Files
-- After downloading, extract both datasets.  
-- For **ASVspoof 5**, place the extracted files in a folder named **`asvspoof5`** (same directory as your source code).  
-- For **ASVspoof 2021**, rename the extracted folder to **`asvspoof2021-eval`**.
-
-**Example directory structure:**
 ```
-Thesis training/
-├── asvspoof5/
-├── asvspoof2021-eval/
-├── models/
-├── protocols/
-└── resnext.py
+deepfake-audio-detection/
+├── data/
+│   ├── raw/
+│   └── protocols/
+├── saved_models/
+├── scripts/
+│   └── prepare_data.py
+├── src/
+│   ├── data_loader.py
+│   ├── models/
+│   ├── trainer.py
+│   └── utils.py
+├── config.py
+├── evaluate.py
+├── requirements.txt
+└── train.py
 ```
 
----
+# Getting Started
 
-### 🎧 Step 3: Convert FLAC to WAV
-- Open `convert_flac_to_wav.py`.
-- Change the input folder path to the location of **asvspoof5**.
-- Run the script to convert all `.flac` files to `.wav`.
-- After finishing, do the same process for **asvspoof2021-eval**.
+Follow these steps to set up the project, train the model, and evaluate its performance.
 
----
+## Step 1: Setup and Installation
 
-### 🧠 Step 4: Training
-- Once all files are converted to `.wav`, you can start training the model.
-- Make sure all dataset and protocol paths in the script are correct.
-- Run the training file (e.g., `resnext.py`).
+### 1. Clone the repository:
 
----
+```
+git clone <your-repository-url>
+cd deepfake-audio-detection
+```
 
-### 🧪 Step 5: Evaluation
-- To evaluate, open your evaluation script.
-- Change the **model path** to the trained model you want to test.
-- Run the evaluation.
-- The result will show the **Equal Error Rate (EER)** of your model.
+### 2. Install dependencies: It's highly recommended to use a virtual environment.
 
----
+```
+pip install -r requirements.txt
+```
 
- E TRAIN NA DAYON. 
+## Step 2: Data Preparation
 
----
+This step involves downloading and organizing all the necessary datasets.
+
+### 1. Download the Audio Data:
+
+- ASVspoof 2019/2021: Download the audio files for ASVspoof 2019 (train/dev) and 2021 (eval).
+- ASVspoof 5: Download the audio files from the [Zenodo Link](https://zenodo.org/records/14498691).
+
+### 2. Download Protocol Files:
+
+- Download the ASVspoof 2019 protocol/metadata files from this [Google Drive link](https://drive.google.com/drive/folders/1dtrVv2Z9V-k020tdSVYDiaGv6pV2Lg-7?).
+
+### 3. Organize the Folders:
+
+- Extract and place all downloaded files into the data/ directory. Your final structure should look like this:
+
+```
+data/
+├── raw/
+│   ├── asvspoof2019_train/      # Contains 2019 training audio
+│   ├── asvspoof2019_dev/        # Contains 2019 development audio
+│   ├── asvspoof2021_eval/       # Contains 2021 evaluation audio
+│   └── asvspoof5/               # Contains ASVspoof 5 audio
+│
+└── protocols/
+    └── ASVspoof2019.LA.cm/      # Contains .txt files from Google Drive
+```
+
+## Step 3: Preprocessing (FLAC to WAV)
+
+Run the provided script to convert all .flac audio files to the .wav format required for training.
+
+```
+python scripts/prepare_data.py
+```
+
+## Step 4: Configuration
+
+Before running the training or evaluation, verify all paths and hyperparameters in the central configuration file.
+
+- Open config.py and ensure that all directory paths (e.g., TRAIN_AUDIO_DIR, PROTOCOLS_DIR) match the locations on your machine.
+
+## Step 5: Model Training
+
+Execute the main training script to start the training process. The script will handle data loading, model training, and saving the best model checkpoint.
+
+```
+python train.py
+```
+
+- Progress will be displayed in the console.
+
+- The best-performing model will be saved automatically in the saved_models/ directory.
+
+## Step 6: Model Evaluation
+
+To evaluate your trained model on the ASVspoof 2021 evaluation set:
+
+- Update Config: Open config.py and make sure the EVAL_MODEL_PATH variable points to your saved model (e.g., saved_models/resnext_teacher_best.pth).
+- Run Evaluation:
+
+```
+python evaluate.py
+```
