@@ -21,10 +21,10 @@ from sklearn.metrics import roc_curve
 # ----------------------------
 # CONFIG — EDIT THESE PATHS
 # ----------------------------
-MODEL_PATH = r"D:\Thesis traning\models\resnext_with_spoof5_and_spoof2019.pth"
+MODEL_PATH = r"D:\Thesis traning\models\resnext_lfcc_asvspoof2019_best.pth"
 PROTO_PATH = r"D:\Thesis traning\protocols\trial_metadata.txt"
-AUDIO_DIR  = r"D:\Thesis traning\asvspoof2021-eval\wav_files"  # folder where LA_E_*.wav are located
-N_SAMPLES  = 20000  # how many samples to test
+AUDIO_DIR  = r"D:\Thesis traning\asvspoof2021-eval\wav_files"  
+N_SAMPLES  = 50000  # how many samples to test
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # LFCC params (match training)

@@ -37,7 +37,7 @@ FRAME_STRIDE = 0.01
 MAX_FRAMES = 224   # number of time frames (width) to fix to for CNN input
 # Training hyperparams
 BATCH_SIZE = 2
-NUM_EPOCHS = 10
+NUM_EPOCHS = 10 
 LR = 1e-4
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 NUM_WORKERS = 2 if torch.cuda.is_available() else 0
