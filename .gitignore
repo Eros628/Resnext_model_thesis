@@ -2,5 +2,5 @@
 asvspoof5/
 asvspoof2019/
 asvspoof2021-eval/
-clean_samples/fake/**
-clean_samples/real/**
+clean_samples/fake/**/*
+clean_samples/real/**/*
